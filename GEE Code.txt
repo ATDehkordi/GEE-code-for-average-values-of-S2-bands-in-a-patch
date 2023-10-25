@@ -1,0 +1,66 @@
+//// This is a code for the extraction mean spectral values in S2 data for nxn patches, centered on th in-situ station.
+
+
+var station = st1 //// The exact pointwise llocation of the in-situ station (format: point)
+var geometry = study_region //// Study region (format: Polygon)
+var dim_of_neighbourhood = 1 // Indicating the patch size: 1 means: 3x3, 2: 5x5, ...
+
+////// a function is developed to filter could-free images
+
+function cloudpercentage_overregion_S2(img) {
+  var qa = img.select('QA60').clip(geometry)
+  
+  // Bits 10 and 11 are clouds and cirrus, respectively.
+  var cloudBitMask = 1 << 10;
+  var cirrusBitMask = 1 << 11;
+
+  // Both flags should be set to zero, indicating clear conditions.
+  var cloudmask = qa.bitwiseAnd(cloudBitMask).eq(0)
+      .and(qa.bitwiseAnd(cirrusBitMask).eq(0));
+  
+  var nocloudpixels = img.select('B9').clip(geometry).updateMask(cloudmask);
+  
+  var numofpixels = img.select('B9').clip(geometry).reduceRegion({
+    reducer: ee.Reducer.count(), 
+    geometry: geometry, 
+    scale: 60,
+  });
+  var validpixels = nocloudpixels.reduceRegion({
+    reducer: ee.Reducer.count(), 
+    geometry: geometry, 
+    scale: 60,
+  });
+  
+  var cloud_percentage = ee.Number(validpixels.get('B9')).divide(ee.Number(numofpixels.get('B9')))
+  return img.set({numofpixels: ee.Number(numofpixels.get('B9'))}).set({validpixels: ee.Number(validpixels.get('B9'))}).set({valid_percentage: cloud_percentage})
+}
+
+//////
+
+var S2 = ee.ImageCollection('COPERNICUS/S2_SR')
+                  .filterDate('2017-01-01', '2023-01-01')
+                  .filterBounds(geometry)
+                  .map(cloudpercentage_overregion_S2).filterMetadata('valid_percentage', 'greater_than', 0.99)
+
+
+///////// Function for extracting mean S2 spectral values over a nxn patch centered on the in-situ pixel.
+
+function sentinel_sampling_neighbourwise(image) {
+  var bands = image.select(['B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B11', 'B12']);
+  var neighbourimage = bands.reduceNeighborhood({
+  reducer: ee.Reducer.mean(),
+  kernel: ee.Kernel.square(dim_of_neighbourhood),
+  })
+  var sampledvalues_mean = neighbourimage.sampleRegions({
+  collection: ee.Feature(station),
+  scale: 10,
+  geometries: true
+  })
+  return sampledvalues_mean
+}
+////////////
+
+
+var values_station_meanneigh_S2 = S2.map(sentinel_sampling_neighbourwise).flatten();
+
+print('Final output', values_station_meanneigh_S2)
