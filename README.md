@@ -8,6 +8,7 @@ The inputs are:
 * Location of in-situ ground station,
 * Study region
 * Final patch size
+
 The output will be:
 * A feature collection which contain k features (number of cloud-free S2 images over the region), each of which has 10 values (spectral bands)
 
